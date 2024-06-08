@@ -188,7 +188,6 @@ export class GameSystem implements ReadableFileSystem {
 		this.fs = fs;
 		this.modroot = root;
 		this.steam = findSteamCache(fs);
-		console.log(this.steam.root);
 	}
 
 	async parse(): Promise<boolean> {
