@@ -32,7 +32,7 @@ export class VpkSystem implements ReadableFileSystem {
 	public version: VpkVersion = VpkVersion.NONE;
 
 	files:  Record<string, VpkFileInfo> = {};
-	dirs:   Record<string, true> = {};
+	dirs:   Record<string, true> = { '': true };
 	cache?: Record<number, Uint8Array> = {};
 
 	constructor(fs: ReadableFileSystem, path: string) {
@@ -117,8 +117,14 @@ export class VpkSystem implements ReadableFileSystem {
 				if (!path.length) break;
 				if (path === ' ') path = '';
 				if (path.length && !path.startsWith('/')) path = '/' + path;
+				
+				// Add all subdirectories.
+				// TODO: Is this performant at all?
 				this.dirs[path] = true;
-				this.dirs[path+'/'] = true;
+				let i=0;
+				while ((i = path.indexOf('/', i+1)) !== -1) {
+					this.dirs[path.slice(0, i)] = true;
+				}
 
 				while (true) {
 					const filename = readString();

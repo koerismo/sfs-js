@@ -189,7 +189,7 @@ export class GameSystem implements ReadableFileSystem {
 		const gi_paths = gi_root.dir('SearchPaths');
 
 		// Set title
-		this.name = gameinfo.dir('GameInfo').pair('game').string();
+		this.name = gi_root.parent!.pair('game').string();
 
 		// Setup directories
 		const dir_gi = this.modroot;
@@ -197,15 +197,17 @@ export class GameSystem implements ReadableFileSystem {
 		const dir_game = this.gameroot = await this.steam.findGame(gi_appid);
 
 		// Read Strata game mounts if present
-		const gi_mounts = gi_root.dir('mount', null);
+		const gi_mounts = gi_root.parent!.dir('mount', null);
 		if (gi_mounts) {
-			console.log('Trying strata mounts');
 			for (const mount of gi_mounts.all()) {
 				if (mount instanceof KeyV) continue;
-
+				
 				// Find app root
 				const dir_mount_root = await this.steam.findGame(mount.key);
-				if (!dir_mount_root) continue;
+				if (!dir_mount_root) {
+					console.error('Failed to mount game', mount.key);
+					continue;
+				}
 
 				for (const mount_folder of mount.all()) {
 					if (mount_folder instanceof KeyV) continue;
