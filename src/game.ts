@@ -2,7 +2,9 @@ import { FileType, InitState, type FileStat, type ReadableFileSystem } from './i
 import { VpkSystem } from './vpk.js';
 
 import { parse as parseStringKV, KeyVRoot, KeyV } from 'fast-vdf';
-import { join, normalize, relative } from 'path/posix';
+import { join, normalize } from 'path/posix';
+import { resolve } from 'path';
+import { platform } from 'os';
 // import { globSync } from 'glob';
 
 const RE_PATH_GI = /\|(gameinfo_path)\|/gi;
@@ -155,6 +157,21 @@ export class SteamCache {
 	}
 }
 
+function findSteamCache(fs: ReadableFileSystem) {
+	let steam_path: string;
+	switch (platform()) {
+		case 'win32':
+			steam_path = 'C:/Program Files (x86)/Steam/';
+			break;
+		case 'darwin':
+			steam_path = join(process.env.HOME!, '/Library/Application Support/Steam/');
+			break;
+		default:
+			steam_path = join(process.env.HOME!, '/.steam/steam/');
+	}
+	return SteamCache.get(fs, steam_path);
+}
+
 /** Represents a game filesystem. This filesystem exists in the context of the drive root. */
 export class GameSystem implements ReadableFileSystem {
 	public name!: string;
@@ -170,7 +187,8 @@ export class GameSystem implements ReadableFileSystem {
 	constructor(fs: ReadableFileSystem, root: string) {
 		this.fs = fs;
 		this.modroot = root;
-		this.steam = SteamCache.get(fs, normalize(join(root, '../../../../')));
+		this.steam = findSteamCache(fs);
+		console.log(this.steam.root);
 	}
 
 	async parse(): Promise<boolean> {
