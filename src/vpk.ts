@@ -121,6 +121,7 @@ export class VpkSystem implements ReadableFileSystem {
 				// Add all subdirectories.
 				// TODO: Is this performant at all?
 				this.dirs[path] = true;
+				this.dirs[path+'/'] = true;
 				let i=0;
 				while ((i = path.indexOf('/', i+1)) !== -1) {
 					this.dirs[path.slice(0, i)] = true;
