@@ -1,4 +1,4 @@
-import { FileType, type FileStat, type ReadableFileSystem } from './index.js';
+import { FileType, type FileStat, type ReadableFileSystem, __console__ as console } from './index.js';
 import Path from 'path/posix';
 
 const SIGNATURE = 0x55aa1234;

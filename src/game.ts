@@ -1,9 +1,8 @@
-import { FileType, InitState, type FileStat, type ReadableFileSystem } from './index.js';
+import { FileType, InitState, type FileStat, type ReadableFileSystem, __console__ as console } from './index.js';
 import { VpkSystem } from './vpk.js';
 
 import { parse as parseStringKV, KeyVRoot, KeyV } from 'fast-vdf';
 import { join, normalize } from 'path/posix';
-import { resolve } from 'path';
 import { platform } from 'os';
 // import { globSync } from 'glob';
 
@@ -184,10 +183,10 @@ export class GameSystem implements ReadableFileSystem {
 	providers: [string[], VpkSystem|FolderSystem][] = [];
 	mounts: GameSystem[] = [];
 
-	constructor(fs: ReadableFileSystem, root: string) {
+	constructor(fs: ReadableFileSystem, root: string, steam?: SteamCache) {
 		this.fs = fs;
 		this.modroot = root;
-		this.steam = findSteamCache(fs);
+		this.steam = steam ?? findSteamCache(fs);
 	}
 
 	async parse(): Promise<boolean> {
@@ -245,7 +244,7 @@ export class GameSystem implements ReadableFileSystem {
 
 			let parsed = parseSearchPath(path.string(), { game: dir_game, mod: dir_cwd, gi: dir_gi });
 			if (!parsed) {
-				console.warn('Path', path.string(), 'failed. Could not locate game install!');
+				console.warn('Path', "'"+path.string()+"'", 'failed. Could not locate game install!');
 				continue;
 			}
 
@@ -269,7 +268,7 @@ export class GameSystem implements ReadableFileSystem {
 		const working: [string[], VpkSystem|FolderSystem][] = [];
 		for (const provider of this.providers) {
 			if (await provider[1].validate()) working.push(provider);
-			else console.warn('Source', provider[1].getPath(''), 'failed validation. This may mean that it is missing or corrupted!');
+			else console.warn('Source', "'"+provider[1].getPath('')+"'", 'failed validation. This may mean that it is missing or corrupted!');
 		}
 
 		this.providers = working;

@@ -1,10 +1,20 @@
 import { GameSystem, SteamCache } from './game.js';
 import { VpkSystem } from './vpk.js';
 
+export function setLogTarget(target: typeof __console__) {
+	if (!target) throw Error('Attempted to set console to undefined!')
+	__console__ = target;
+}
+export let __console__: {
+	log: Console['log'],
+	warn: Console['warn'],
+	error: Console['error'],
+} = console;
+
 export {
 	GameSystem,
 	VpkSystem,
-	SteamCache
+	SteamCache,
 }
 
 /** Implements a subset of the VSC FileSystem interface. */
