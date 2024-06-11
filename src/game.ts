@@ -85,10 +85,16 @@ export class FolderSystem implements ReadableFileSystem {
 }
 
 /** Shorthand function for parsing bytes as keyvalues */
-function parseKV(text: string|Uint8Array|undefined): KeyVRoot|undefined {
-	if (!text) return undefined;
-	if (typeof text !== 'string') text = new TextDecoder().decode(text);
-	return parseStringKV(text, { escapes: false, multilines: false, types: false });
+async function readKV(fs: ReadableFileSystem, path: string): Promise<KeyVRoot|undefined> {
+	try {
+		const bytes = await fs.readFile(path);
+		if (!bytes) return undefined;
+		const text = new TextDecoder().decode(bytes);
+		return parseStringKV(text, { escapes: false, multilines: false, types: false });
+	}
+	catch {
+		return undefined;
+	}
 }
 
 /** Locates games within the user's Steam library. */
@@ -112,28 +118,32 @@ export class SteamCache {
 	}
 
 	async parse(): Promise<boolean> {
-		this.initialized = InitState.Error;;
+		this.initialized = InitState.Error;
 
 		// Get the list of libraries
-		const libfolders_bytes = await this.fs.readFile(join(this.root, 'steamapps/libraryfolders.vdf'));
-		const libfolders = parseKV(libfolders_bytes);
+		const libfolders = await readKV(this.fs, join(this.root, 'steamapps/libraryfolders.vdf'));
 		if (!libfolders) return false;
 
 		const lf_root = libfolders.dir('libraryfolders');
 		for (const library of lf_root.all()) {
 			if (library instanceof KeyV) continue;
 			
-			const lib_path = library.pair('path').string();
+			const lib_path = library.pair('path').string().replaceAll('\\\\', '/');
 			const lib_apps = library.dir('apps').all().map(x => x.key);
+			console.log(`Resolving ${lib_apps.length} apps from library '${lib_path}'`);
 			
-			for (const app of lib_apps) {
-				const appmanifest_bytes = await this.fs.readFile(join(this.root, 'steamapps/appmanifest_'+app+'.acf'));
-				const appmanifest = parseKV(appmanifest_bytes);
-				if (!appmanifest) continue;
+			app: for (const app of lib_apps) {
+				const appmanifest = await readKV(this.fs, join(lib_path, 'steamapps/appmanifest_'+app+'.acf'));
+				if (!appmanifest) continue app;
 				
-				const app_root = appmanifest.dir('AppState');
-				const app_dir = app_root.pair('installdir').string();
-				this.cache[app] = join(lib_path, 'steamapps/common', app_dir+'/');
+				try {
+					const app_root = appmanifest.dir('AppState');
+					const app_dir = app_root.pair('installdir').string();
+					this.cache[app] = join(lib_path, 'steamapps/common', app_dir+'/');
+				}
+				catch(e) {
+					console.error('Failed to parse appmanifest for appid', app, e);
+				} 
 
 				// Lots of info here, but we don't need most of it.
 				// const app_name = app_root.pair('name').string();
@@ -197,8 +207,7 @@ export class GameSystem implements ReadableFileSystem {
 		this.initialized = InitState.Error;
 		
 		// Read & parse gameinfo
-		const gameinfo_bytes = await this.fs.readFile(join(this.modroot, 'gameinfo.txt'));
-		const gameinfo = parseKV(gameinfo_bytes);
+		const gameinfo = await readKV(this.fs, join(this.modroot, 'gameinfo.txt'));
 		if (!gameinfo) return false;
 		const gi_root = gameinfo.dir('GameInfo').dir('FileSystem');
 		const gi_appid = gi_root.pair('SteamAppId').string();
@@ -230,7 +239,10 @@ export class GameSystem implements ReadableFileSystem {
 					
 					for (const mount_item of mount_folder.all()) {
 						if (!(mount_item instanceof KeyV)) continue;
-						if (mount_item.key !== 'vpk') throw Error('TODO: IMPLEMENT MOUNT FOLDERS!!!');
+						if (mount_item.key !== 'vpk') {
+							console.error(`if you're seeing this message, please yell at jadon to fix Strata 'dir' mounts`);
+							continue;
+						}
 						const mount_path = join(dir_mount_root, mount_folder.key, mount_item.string()+'_dir.vpk');
 						this.providers.push([['game'], new VpkSystem(this.fs, mount_path)]);
 					}
@@ -244,7 +256,7 @@ export class GameSystem implements ReadableFileSystem {
 
 			let parsed = parseSearchPath(path.string(), { game: dir_game, mod: dir_cwd, gi: dir_gi });
 			if (!parsed) {
-				console.warn('Path', "'"+path.string()+"'", 'failed. Could not locate game install!');
+				console.warn('Path', "'"+path.string()+"'", 'could not be resolved. Could not locate game install!');
 				continue;
 			}
 
