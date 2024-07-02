@@ -3,6 +3,10 @@
 	"module": "src/index.ts",
 	"type": "module",
 	"main": "dist/index.js",
+	"scripts": {
+		"build": "tsc",
+		"watch": "tsc --watch"
+	},
 	"exports": {
 		".": "./dist/index.js",
 		"./vsc": {

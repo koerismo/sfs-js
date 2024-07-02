@@ -4,26 +4,30 @@ import { VpkSystem } from './vpk.js';
 import { parse as parseStringKV, KeyVRoot, KeyV } from 'fast-vdf';
 import { join, normalize } from 'path/posix';
 import { platform } from 'os';
-// import { globSync } from 'glob';
+import { NodeSystem } from './fs.node.js';
+import { globSync } from 'glob';
 
 const RE_PATH_GI = /\|(gameinfo_path)\|/gi;
 const RE_PATH_ASP = /\|(all_source_engine_paths)\|/gi;
-function parseSearchPath(sp: string, paths: { game?: string, mod: string, gi: string }): string|undefined {
+function parseSearchPath(sp: string, gamePath: string|undefined, modPath: string, giPath: string): string|undefined {
 	const has_gi = RE_PATH_GI.test(sp);
 	if (has_gi || RE_PATH_ASP.test(sp)) {
-		if (!has_gi && paths.game === undefined) return undefined;
-		sp = sp.replaceAll(RE_PATH_GI, paths.gi+'/').replaceAll(RE_PATH_ASP, paths.mod+'/');
+		if (!has_gi && gamePath === undefined) return undefined;
+		sp = sp.replaceAll(RE_PATH_GI, giPath+'/').replaceAll(RE_PATH_ASP, modPath+'/');
 		return normalize(sp);
 	}
 
-	if (paths.game === undefined) return undefined;
-	return normalize(join(paths.game, sp));
+	if (gamePath === undefined) return undefined;
+	return normalize(join(gamePath, sp));
 }
 
-// function matchSearchPath(fs: ReadableFileSystem, sp: string): string[] {
-// 	if (!(fs instanceof NodeSystem)) throw Error(`Glob searching in virtual filesystems is not implemented!`);
-// 	return globSync(sp);
-// }
+function parseGlobSearchPath(fs: ReadableFileSystem, sp: string, gamePath: string|undefined, modPath: string, giPath: string): string[]|undefined {
+	const globbyPath = parseSearchPath(sp, gamePath, modPath, giPath);
+	if (!(fs instanceof NodeSystem) && globbyPath) return [globbyPath];
+	if (!globbyPath) return undefined;
+	const matches = globSync(globbyPath, { absolute: true });
+	return matches;
+}
 
 /** A simple folder-specific filesystem that works within the provided filesystem. */
 export class FolderSystem implements ReadableFileSystem {
@@ -275,25 +279,27 @@ export class GameSystem implements ReadableFileSystem {
 		for (const path of gi_paths.all()) {
 			if (!(path instanceof KeyV)) continue;
 
-			let parsed = parseSearchPath(path.string(), { game: dir_game, mod: dir_cwd, gi: dir_gi });
+			let rawPath = path.string();
+			if (rawPath.endsWith('.vpk'))
+				rawPath = rawPath.slice(0, -4) + '_dir.vpk';
+
+			const parsed = parseGlobSearchPath(this.fs, rawPath, dir_game, dir_cwd, dir_gi);
 			if (!parsed) {
 				console.warn('Path', "'"+path.string()+"'", 'could not be resolved. Could not locate game install!');
 				continue;
 			}
+			console.log('Found', parsed.length, 'items from path', rawPath);
 
-			// Game+Mod, GameBin, etc
-			const qualifiers = path.key.toLowerCase().split('+').map(x => x.trim());
+			for (let parsedPath of parsed) {
+				// Game+Mod, GameBin, etc
+				const qualifiers = path.key.toLowerCase().split('+').map(x => x.trim());
 
-			// TODO: Sometimes paths use glob matching. Implement this!
-			// matchSearchPath(...)
-			
-			if (parsed.endsWith('.vpk')) {
-				parsed = parsed.slice(0, -4) + '_dir.vpk';
-				this.providers.push([qualifiers, new VpkSystem(this.fs, parsed)]);
+				if (parsedPath.endsWith('.vpk'))
+					this.providers.push([qualifiers, new VpkSystem(this.fs, parsedPath)]);
+				else
+					this.providers.push([qualifiers, new FolderSystem(this.fs, parsedPath)]);
 			}
-			else {
-				this.providers.push([qualifiers, new FolderSystem(this.fs, parsed)]);
-			}
+
 		}
 
 		// TODO: This isn't totally necessary, since failed sources skip themselves. We do want to run the validation on all of them though.
