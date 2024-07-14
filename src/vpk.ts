@@ -201,16 +201,16 @@ export class VpkSystem implements ReadableFileSystem {
 			if (!file.startsWith(path)) continue;
 			const slash_pos = file.indexOf(SLASH, path.length+1);
 			const is_dir = slash_pos !== -1;
-			
+
 			if (is_dir) {
 				const dirname = file.slice(0, slash_pos);
 				if (dirname === path) continue;
 				if (dirname in included) continue;
 				included[dirname] = true;
-				out.push([dirname, FileType.Directory]);
+				out.push([Path.basename(dirname), FileType.Directory]);
 			}
 			else {
-				out.push([file, FileType.File]);
+				out.push([Path.basename(file), FileType.File]);
 			}
 		}
 
