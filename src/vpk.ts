@@ -11,7 +11,7 @@ const SLASH = '/';
 
 export interface VpkFileInfo {
 	crc: number;
-	preloadBytes: number;
+	preloadBytes: Uint8Array;
 	archiveIndex: number;
 	offset: number;
 	length: number;
@@ -90,20 +90,22 @@ export class VpkSystem implements ReadableFileSystem {
 
 		// struct VPKDirectoryEntry
 		function readFileInfo(): VpkFileInfo {
-			const crc          =  view.getUint32(i,    LE);
-			const preloadBytes =  view.getUint16(i+4,  LE);
-			const archiveIndex =  view.getUint16(i+6,  LE);
-			const entryOffset  =  view.getUint32(i+8,  LE);
-			const entryLength  =  view.getUint32(i+12, LE);
+			const crc           =  view.getUint32(i,    LE);
+			const preloadLength =  view.getUint16(i+4,  LE);
+			const archiveIndex  =  view.getUint16(i+6,  LE);
+			const entryOffset   =  view.getUint32(i+8,  LE);
+			const entryLength   =  view.getUint32(i+12, LE);
 			i += 16 + 2;
-			i += preloadBytes;
+
+			const preloadBytes = bytes.slice(i, i + preloadLength);
+			i += preloadLength;
 
 			return {
 				crc,
-				preloadBytes,
+				preloadBytes: preloadBytes,
 				archiveIndex,
 				offset: entryOffset,
-				length: entryLength
+				length: entryLength,
 			};
 		}
 
@@ -160,7 +162,7 @@ export class VpkSystem implements ReadableFileSystem {
 	}
 
 	async #getArchiveData(index: number): Promise<Uint8Array|undefined> {
-		if (this.cache && index in this.cache) return this.cache[index];
+		if (this.cache && (index in this.cache)) return this.cache[index];
 
 		const archive_path = this.#getArchivePath(index);
 		// If you're using the actual vscode API, that means this returns a node buffer. BE SURE TO ADD A UINT8ARRAY WRAPPER!!!
@@ -184,11 +186,23 @@ export class VpkSystem implements ReadableFileSystem {
 		const info = await this.getFileInfo(path);
 		if (!info) return undefined;
 
+		// Entire file is stored in preloadBytes
+		if (!info.length) {
+			return info.preloadBytes.slice();
+		}
+
 		const archive_data = await this.#getArchiveData(info.archiveIndex);
 		if (!archive_data) return undefined;
+		
+		// Make a sub-array without cloning the buffer to avoid an unnecessary copy
+		const archive_window = new Uint8Array(archive_data.buffer, info.offset, info.length);
+		
+		// Combine preloadBytes and body data in new buffer
+		const out_data = new Uint8Array(info.length + info.preloadBytes.length);
+		out_data.set(info.preloadBytes, 0);
+		out_data.set(archive_window, info.preloadBytes.length);
 
-		const data = archive_data.slice(info.offset, info.offset+info.length);
-		return data;
+		return out_data;
 	}
 
 	async readDirectory(path: string): Promise<[string, FileType][]|undefined> {

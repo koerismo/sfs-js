@@ -332,18 +332,18 @@ export class GameSystem implements ReadableFileSystem {
 		if (!await this.validate()) return undefined;
 
 		if (preferVpk) {
-			for (const provider of this._vpks) {
-				if (qualifier && !provider[0].includes(qualifier)) continue;
-				const file = await provider[1].readFile(path);
+			for (const [qualifiers, system] of this._vpks) {
+				if (qualifier && !qualifiers.includes(qualifier)) continue;
+				const file = await system.readFile(path);
 
 				if (file === undefined) continue;
 				return file;
 			}
 
-			for (const provider of this._loose) {
-				if (qualifier && !provider[0].includes(qualifier)) continue;
+			for (const [qualifiers, system] of this._loose) {
+				if (qualifier && !qualifiers.includes(qualifier)) continue;
 	
-				const file = await provider[1].readFile(path);
+				const file = await system.readFile(path);
 				if (file === undefined) continue;
 				return file;
 			}
@@ -351,10 +351,10 @@ export class GameSystem implements ReadableFileSystem {
 			return undefined;
 		}
 
-		for (const provider of this.providers) {
-			if (qualifier && !provider[0].includes(qualifier)) continue;
+		for (const [qualifiers, system] of this.providers) {
+			if (qualifier && !qualifiers.includes(qualifier)) continue;
 
-			const file = await provider[1].readFile(path);
+			const file = await system.readFile(path);
 			if (file === undefined) continue;
 			return file;
 		}
