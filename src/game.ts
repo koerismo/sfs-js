@@ -7,18 +7,22 @@ import { platform } from 'os';
 import { NodeSystem } from './fs.node.js';
 import { globSync } from 'glob';
 
-const RE_PATH_GI = /\|(gameinfo_path)\|/gi;
-const RE_PATH_ASP = /\|(all_source_engine_paths)\|/gi;
-function parseSearchPath(sp: string, gamePath: string|undefined, modPath: string, giPath: string): string|undefined {
-	const has_gi = RE_PATH_GI.test(sp);
-	if (has_gi || RE_PATH_ASP.test(sp)) {
-		if (!has_gi && gamePath === undefined) return undefined;
-		sp = sp.replaceAll(RE_PATH_GI, giPath+'/').replaceAll(RE_PATH_ASP, modPath+'/');
-		return normalize(sp);
+const GAMEINFO_PREFIX = '|gameinfo_path|';
+const ALL_SOURCE_PREFIX = '|all_source_engine_paths|';
+
+function parseSearchPath(path: string, gamePath: string|undefined, modPath: string, giPath: string): string|undefined {
+	const pathLower = path.toLowerCase();
+
+	if (pathLower.startsWith(GAMEINFO_PREFIX)) {
+		return join(giPath, path.slice(GAMEINFO_PREFIX.length));
 	}
 
-	if (gamePath === undefined) return undefined;
-	return normalize(join(gamePath, sp));
+	else if (pathLower.startsWith(ALL_SOURCE_PREFIX)) {
+		return join(modPath, path.slice(ALL_SOURCE_PREFIX.length));
+	}
+
+	if (gamePath === undefined) return;
+	return join(gamePath, path);
 }
 
 function parseGlobSearchPath(fs: ReadableFileSystem, sp: string, gamePath: string|undefined, modPath: string, giPath: string): string[]|undefined {
