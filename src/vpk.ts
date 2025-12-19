@@ -24,7 +24,11 @@ export enum VpkVersion {
 	V2 = 2,
 }
 
+// TODO: Add some form of cache cleaning to prevent memory usage buildup!
+// TODO: Be more efficient with file reads & memory when accessing dir-inlined files!
+
 export class VpkSystem implements ReadableFileSystem {
+	public readonly kind = 'vpk';
 	public readonly fs: ReadableFileSystem;
 	public readonly name: string; // XYZ
 	public readonly path: string; // ABC/XYZ_dir.vpk
@@ -33,15 +37,23 @@ export class VpkSystem implements ReadableFileSystem {
 
 	files:  Record<string, VpkFileInfo> = {};
 	dirs:   Record<string, true> = { '': true };
-	cache?: Record<number, Uint8Array> = {};
+	cache?: Record<number, Uint8Array>;
 
-	constructor(fs: ReadableFileSystem, path: string) {
+	treeSize: number = 0;
+	single: boolean;
+
+	constructor(fs: ReadableFileSystem, path: string, enableCache: boolean=true) {
+		// TODO: What do we do if it ends with .VPK (capitalized)?
+		if (!path.endsWith('.vpk')) path += '.vpk';
+
 		this.fs = fs;
+		this.single = !path.endsWith('_dir.vpk');
+		if (enableCache) this.cache = {};
 
 		// Setup paths
 		this.path = path;
 		this.root = Path.dirname(path);
-		this.name = Path.basename(path).slice(0,-8);
+		this.name = Path.basename(path).slice(0, this.single ? -4 : -8);
 	}
 
 	async parse(force: boolean=false): Promise<boolean> {
@@ -61,8 +73,7 @@ export class VpkSystem implements ReadableFileSystem {
 		if (version < VER_MIN || version > VER_MAX) throw Error(`Invalid vpk version! (${version})`);
 		const SIZE_HEADER = version === 2 ? 28 : 12;
 		this.version = version;
-
-		const treeSize = view.getUint32(8, LE);
+		this.treeSize = view.getUint32(8, LE);
 
 		// V2 checksum stuff. Not used at the moment.
 		if (version === 2) {
@@ -119,7 +130,7 @@ export class VpkSystem implements ReadableFileSystem {
 				if (!path.length) break;
 				if (path === ' ') path = '';
 				if (path.length && !path.startsWith('/')) path = '/' + path;
-				
+
 				// Add all subdirectories.
 				// TODO: Is this performant at all?
 				this.dirs[path] = true;
@@ -157,12 +168,19 @@ export class VpkSystem implements ReadableFileSystem {
 	}
 
 	#getArchivePath(index: number): string {
-		const number_string = ('00' + index).slice(-3);
-		return Path.join(this.root, this.name+'_'+number_string+'.vpk');
+		if (index === INDEX_INLINE) return this.path;
+		const idx_string = (index + '').padStart(3, '0');
+		return Path.join(this.root, `${this.name}_${idx_string}.vpk`);
+	}
+
+	cleanCache() {
+		if (this.cache)
+			this.cache = {};
 	}
 
 	async #getArchiveData(index: number): Promise<Uint8Array|undefined> {
-		if (this.cache && (index in this.cache)) return this.cache[index];
+		const cached_data = this.cache?.[index];
+		if (cached_data) return cached_data;
 
 		const archive_path = this.#getArchivePath(index);
 		// If you're using the actual vscode API, that means this returns a node buffer. BE SURE TO ADD A UINT8ARRAY WRAPPER!!!
@@ -191,11 +209,16 @@ export class VpkSystem implements ReadableFileSystem {
 			return info.preloadBytes.slice();
 		}
 
+		let offset = info.offset;
+		if (info.archiveIndex === INDEX_INLINE) {
+			offset += this.treeSize;
+		}
+
 		const archive_data = await this.#getArchiveData(info.archiveIndex);
 		if (!archive_data) return undefined;
-		
+
 		// Make a sub-array without cloning the buffer to avoid an unnecessary copy
-		const archive_window = new Uint8Array(archive_data.buffer, info.offset, info.length);
+		const archive_window = new Uint8Array(archive_data.buffer, offset, info.length);
 		
 		// Combine preloadBytes and body data in new buffer
 		const out_data = new Uint8Array(info.length + info.preloadBytes.length);

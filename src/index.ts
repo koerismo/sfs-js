@@ -5,10 +5,11 @@ export function setLogTarget(target: typeof __console__) {
 	if (!target) throw Error('Attempted to set console to undefined!')
 	__console__ = target;
 }
+
 export let __console__: {
-	log: Console['log'],
-	warn: Console['warn'],
-	error: Console['error'],
+	log(...data: any[]): void;
+	warn(...data: any[]): void;
+	error(...data: any[]): void;
 } = console;
 
 export {

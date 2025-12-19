@@ -1,7 +1,7 @@
 import { FileType, InitState, type FileStat, type ReadableFileSystem, __console__ as console } from './index.js';
 import { VpkSystem } from './vpk.js';
 
-import { parse as parseStringKV, KeyVRoot, KeyV } from 'fast-vdf';
+import { parse as parseStringKV, KeyVRoot, KeyV, type KeyVChild } from 'fast-vdf';
 import { join, normalize } from 'path/posix';
 import { platform } from 'os';
 import { NodeSystem } from './fs.node.js';
@@ -10,7 +10,7 @@ import { globSync } from 'glob';
 const GAMEINFO_PREFIX = '|gameinfo_path|';
 const ALL_SOURCE_PREFIX = '|all_source_engine_paths|';
 
-function parseSearchPath(path: string, gamePath: string|undefined, modPath: string, giPath: string): string|undefined {
+function parseSearchPath(path: string, gamePath: string|undefined, modPath: string, giPath: string): string | undefined {
 	const pathLower = path.toLowerCase();
 
 	if (pathLower.startsWith(GAMEINFO_PREFIX)) {
@@ -25,7 +25,7 @@ function parseSearchPath(path: string, gamePath: string|undefined, modPath: stri
 	return join(gamePath, path);
 }
 
-function parseGlobSearchPath(fs: ReadableFileSystem, sp: string, gamePath: string|undefined, modPath: string, giPath: string): string[]|undefined {
+function parseGlobSearchPath(fs: ReadableFileSystem, sp: string, gamePath: string|undefined, modPath: string, giPath: string): string[] | undefined {
 	const globbyPath = parseSearchPath(sp, gamePath, modPath, giPath);
 	if (!(fs instanceof NodeSystem) && globbyPath) return [globbyPath];
 	if (!globbyPath) return undefined;
@@ -35,6 +35,7 @@ function parseGlobSearchPath(fs: ReadableFileSystem, sp: string, gamePath: strin
 
 /** A simple folder-specific filesystem that works within the provided filesystem. */
 export class FolderSystem implements ReadableFileSystem {
+	public readonly kind = 'dir';
 	public readonly fs: ReadableFileSystem;
 	public readonly root: string;
 
@@ -87,7 +88,7 @@ export class FolderSystem implements ReadableFileSystem {
 }
 
 /** Shorthand function for parsing bytes as keyvalues */
-async function readKV(fs: ReadableFileSystem, path: string): Promise<KeyVRoot|undefined> {
+async function readKV(fs: ReadableFileSystem, path: string): Promise<KeyVRoot | undefined> {
 	try {
 		const bytes = await fs.readFile(path);
 		if (!bytes) return undefined;
@@ -145,7 +146,7 @@ export class SteamCache {
 		return true;
 	}
 
-	async parseGame(appid: string, force=false): Promise<string|undefined> {
+	async parseGame(appid: string, force=false): Promise<string | undefined> {
 		const lib_path = this.applibcache[appid];
 		if (!lib_path) return undefined;
 		if (!force && appid in this.appdircache) return undefined;
@@ -168,7 +169,7 @@ export class SteamCache {
 		return this.appdircache[appid];
 	}
 
-	async findGame(appid: string): Promise<string|undefined> {
+	async findGame(appid: string): Promise<string | undefined> {
 		if (!this.initialized) await this.parse();
 		if (!(appid in this.appdircache)) await this.parseGame(appid);
 		return this.appdircache[appid];
@@ -216,10 +217,9 @@ export class GameSystem implements ReadableFileSystem {
 	public initialized: InitState = InitState.None;
 
 	steam: SteamCache;
-	providers: [string[], VpkSystem|FolderSystem][] = [];
 	mounts: GameSystem[] = [];
-	_vpks: [string[], VpkSystem][] = [];
-	_loose: [string[], FolderSystem][] = [];
+	providers: [string[], VpkSystem | FolderSystem][] = [];
+	_providersSorted: [string[], VpkSystem | FolderSystem][] = [];
 
 	constructor(fs: ReadableFileSystem, root: string, steam?: SteamCache) {
 		this.fs = fs;
@@ -233,7 +233,7 @@ export class GameSystem implements ReadableFileSystem {
 		//
 
 		this.initialized = InitState.Error;
-		
+
 		// Read & parse gameinfo
 		const gameinfo = await readKV(this.fs, join(this.modroot, 'gameinfo.txt'));
 		if (!gameinfo) return false;
@@ -251,34 +251,61 @@ export class GameSystem implements ReadableFileSystem {
 		const dir_game = this.gameroot = await this.steam.findGame(gi_appid);
 
 		// Read Strata game mounts if present
-		const gi_mounts = gi_root.parent!.dir('mount', null);
-		if (gi_mounts) {
-			for (const mount of gi_mounts.all()) {
-				if (mount instanceof KeyV) continue;
-				
-				// Find app root
-				const dir_mount_root = await this.steam.findGame(mount.key);
-				if (!dir_mount_root) {
-					console.error('Failed to mount game', mount.key);
-					continue;
-				}
+		let mounts: KeyVChild[] = [];
 
-				for (const mount_folder of mount.all()) {
-					if (mount_folder instanceof KeyV) continue;
-					
-					for (const mount_item of mount_folder.all()) {
-						if (!(mount_item instanceof KeyV)) continue;
-						if (mount_item.key !== 'vpk') {
-							console.error(`if you're seeing this message, please yell at jadon to fix Strata 'dir' mounts`);
-							continue;
+		// ... from gameinfo
+		const gi_mounts = gi_root.parent!.dir('mount', null);
+		if (gi_mounts) mounts = gi_mounts.all();
+
+		// ... from config
+		const cfg_mounts = await readKV(this.fs, join(this.modroot, 'cfg', 'mounts.kv'));
+		if (cfg_mounts) mounts = mounts.concat(cfg_mounts.all());
+
+		// Parse collected mounts
+		for (const mount of mounts) {
+			if (mount instanceof KeyV)
+				continue;
+			if (mount.pair('enabled', null)?.bool() === false)
+				continue;
+
+			// Find app root
+			const dir_mount_root = await this.steam.findGame(mount.key);
+			if (!dir_mount_root) {
+				console.error('Failed to mount game', mount.key);
+				continue;
+			}
+
+			for (const mount_folder of mount.all()) {
+				if (mount_folder instanceof KeyV) continue;
+				
+				for (const mount_item of mount_folder.all()) {
+					if (!(mount_item instanceof KeyV)) continue;
+
+					switch (mount_item.key) {
+						case 'vpk': {
+							let vpk_path = join(dir_mount_root, mount_folder.key, mount_item.string());
+							if (await this.fs.stat(vpk_path + '.vpk'))
+								vpk_path += '.vpk';
+							else
+								vpk_path += '_dir.vpk';
+
+							this.providers.push([['game'], new VpkSystem(this.fs, vpk_path)]);
+							break;
 						}
-						const mount_path = join(dir_mount_root, mount_folder.key, mount_item.string()+'_dir.vpk');
-						this.providers.push([['game'], new VpkSystem(this.fs, mount_path)]);
+						case 'dir': {
+							const folder_path = join(dir_mount_root, mount_folder.key, mount_item.string());
+							this.providers.push([['game'], new FolderSystem(this.fs, folder_path)]);
+							break;
+						}
+						default: {
+							console.error(`Unrecognized mount type "${mount_item.key}"`);
+						}
 					}
+
 				}
 			}
 		}
-		
+
 		// Parse paths
 		for (const path of gi_paths.all()) {
 			if (!(path instanceof KeyV)) continue;
@@ -292,6 +319,7 @@ export class GameSystem implements ReadableFileSystem {
 				console.warn('Path', "'"+path.string()+"'", 'could not be resolved. Could not locate game install!');
 				continue;
 			}
+
 			console.log('Found', parsed.length, 'items from path', rawPath);
 
 			for (let parsedPath of parsed) {
@@ -315,8 +343,7 @@ export class GameSystem implements ReadableFileSystem {
 		}
 
 		this.providers = working;
-		this._vpks = this.providers.filter(x => x[1] instanceof VpkSystem) as [string[], VpkSystem][];
-		this._loose = this.providers.filter(x => x[1] instanceof FolderSystem) as [string[], FolderSystem][];
+		this._providersSorted = working.toSorted((a, b) => +(b[1].kind === 'vpk') - +(a[1].kind === 'vpk'));
 		this.initialized = InitState.Ready;
 		return true;
 	}
@@ -333,29 +360,11 @@ export class GameSystem implements ReadableFileSystem {
 	}
 
 	async readFile(path: string, qualifier?: string, preferVpk: boolean=false): Promise<Uint8Array | undefined> {
-		if (!await this.validate()) return undefined;
+		if (!await this.validate()) return;
 
-		if (preferVpk) {
-			for (const [qualifiers, system] of this._vpks) {
-				if (qualifier && !qualifiers.includes(qualifier)) continue;
-				const file = await system.readFile(path);
+		const providers = preferVpk ? this._providersSorted : this.providers;
 
-				if (file === undefined) continue;
-				return file;
-			}
-
-			for (const [qualifiers, system] of this._loose) {
-				if (qualifier && !qualifiers.includes(qualifier)) continue;
-	
-				const file = await system.readFile(path);
-				if (file === undefined) continue;
-				return file;
-			}
-
-			return undefined;
-		}
-
-		for (const [qualifiers, system] of this.providers) {
+		for (const [qualifiers, system] of providers) {
 			if (qualifier && !qualifiers.includes(qualifier)) continue;
 
 			const file = await system.readFile(path);
@@ -363,45 +372,27 @@ export class GameSystem implements ReadableFileSystem {
 			return file;
 		}
 
-		return undefined;
+		return;
 	}
 
 	async getPath(path: string, qualifier?: string, preferVpk: boolean=false): Promise<string|undefined> {
-		if (!await this.validate()) return undefined;
+		if (!await this.validate()) return;
 
-		if (preferVpk) {
-			for (const provider of this._vpks) {
-				if (qualifier && !provider[0].includes(qualifier)) continue;
-				
-				const file = await provider[1].stat(path);
-				if (file === undefined) continue;
-				return provider[1].getPath(path);
-			}
-			
-			for (const provider of this._loose) {
-				if (qualifier && !provider[0].includes(qualifier)) continue;
-				
-				const file = await provider[1].stat(path);
-				if (file === undefined) continue;
-				return provider[1].getPath(path);
-			}
+		const providers = preferVpk ? this._providersSorted : this.providers;
 
-			return undefined;
-		}
+		for (const [qualifiers, system] of providers) {
+			if (qualifier && !qualifiers.includes(qualifier)) continue;
 
-		for (const provider of this.providers) {
-			if (qualifier && !provider[0].includes(qualifier)) continue;
-			
-			const file = await provider[1].stat(path);
+			const file = await system.stat(path);
 			if (file === undefined) continue;
-			return provider[1].getPath(path);
+			return system.getPath(path);
 		}
 
-		return undefined;
+		return;
 	}
 
 	async readDirectory(path: string, qualifier?: string): Promise<[string, FileType][] | undefined> {
-		if (!await this.validate()) return undefined;
+		if (!await this.validate()) return;
 
 		let exists = false;
 		const found: Record<string, true> = {};
@@ -420,21 +411,22 @@ export class GameSystem implements ReadableFileSystem {
 				out.push(file);
 			}
 		}
-		
+
 		if (exists) return out;
-		return undefined;
+		return;
 	}
 
 	async stat(path: string, qualifier?: string): Promise<FileStat | undefined> {
-		if (!await this.validate()) return undefined;
+		if (!await this.validate()) return;
 
-		for (const provider of this.providers) {
-			if (qualifier && !provider[0].includes(qualifier)) continue;
+		for (const [qualifiers, system] of this._providersSorted) {
+			if (qualifier && !qualifiers.includes(qualifier)) continue;
 
-			const file = await provider[1].stat(path);
+			const file = await system.stat(path);
 			if (file === undefined) continue;
 			return file;
 		}
+
 		return undefined;
 	}
 }
