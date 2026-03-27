@@ -56,7 +56,7 @@ export class VpkSystem implements ReadableFileSystem {
 		this.name = Path.basename(path).slice(0, this.single ? -4 : -8);
 	}
 
-	async parse(force: boolean=false): Promise<boolean> {
+	protected async parse(force: boolean=false): Promise<boolean> {
 		if (!force && this.version === VpkVersion.INVALID) return false;
 
 		// In case an error is thrown, leave us on invalid.
@@ -134,10 +134,10 @@ export class VpkSystem implements ReadableFileSystem {
 				// Add all subdirectories.
 				// TODO: Is this performant at all?
 				this.dirs[path] = true;
-				this.dirs[path+'/'] = true;
-				let i=0;
-				while ((i = path.indexOf('/', i+1)) !== -1) {
-					this.dirs[path.slice(0, i)] = true;
+				// this.dirs[path+'/'] = true;
+				let p = 0;
+				while ((p = path.indexOf('/', p+1)) !== -1) {
+					this.dirs[path.slice(0, p)] = true;
 				}
 
 				while (true) {
@@ -148,6 +148,8 @@ export class VpkSystem implements ReadableFileSystem {
 				}
 			}
 		}
+
+		console.log(Object.keys(this.files));
 
 		return true;
 	}

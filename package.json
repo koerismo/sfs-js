@@ -29,8 +29,8 @@
 		"typescript": "^5.0.0"
 	},
 	"dependencies": {
-		"@types/vscode": "^1.107.0",
+		"@types/vscode": "^1.110.0",
 		"fast-vdf": "^3.0.0",
-		"glob": "^13.0.0"
+		"glob": "^13.0.6"
 	}
 }

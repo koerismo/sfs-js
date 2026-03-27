@@ -1,4 +1,4 @@
-import { GameSystem, SteamCache } from './game.js';
+import { GameSystem, SteamCache, findSteamCache } from './game.js';
 import { VpkSystem } from './vpk.js';
 
 export function setLogTarget(target: typeof __console__) {
@@ -16,6 +16,7 @@ export {
 	GameSystem,
 	VpkSystem,
 	SteamCache,
+	findSteamCache,
 }
 
 /** Implements a subset of the VSC FileSystem interface. */
