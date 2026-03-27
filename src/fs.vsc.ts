@@ -4,14 +4,29 @@ import { workspace, Uri } from 'vscode';
 export class VSCodeSystem implements ReadableFileSystem {
 
 	async readFile(path: string): Promise<Uint8Array | undefined> {
-		return new Uint8Array(await workspace.fs.readFile(Uri.file(path)));
+		try {
+			return new Uint8Array(await workspace.fs.readFile(Uri.file(path)));
+		}
+		catch {
+			return;
+		}
 	}
 
 	async readDirectory(path: string): Promise<[string, FileType][] | undefined> {
-		return workspace.fs.readDirectory(Uri.file(path));
+		try {
+			return workspace.fs.readDirectory(Uri.file(path));
+		}
+		catch {
+			return;
+		}
 	}
 
 	async stat(path: string): Promise<FileStat | undefined> {
-		return workspace.fs.stat(Uri.file(path));
+		try {
+			return workspace.fs.stat(Uri.file(path));
+		}
+		catch {
+			return;
+		}
 	}
 }
