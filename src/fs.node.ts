@@ -15,13 +15,21 @@ export class NodeSystem implements ReadableFileSystem {
 
 	async readDirectory(path: string): Promise<[string, FileType][] | undefined> {
 		try {
-			const dir = await readdir(path, { withFileTypes: true, recursive: false });
-			const out = new Array(dir.length);
+			const dirItems = await readdir(path, { withFileTypes: true, recursive: false });
+			const out = new Array<[string, FileType]>(dirItems.length);
+
 			for (let i=0; i<out.length; i++) {
-				const type = dir[i].isFile() ? FileType.File : FileType.Directory;
-				const subpath = relative(path, join(path, dir[i].name));
-				out[i] = [subpath, type];
+				const entry = dirItems[i];
+
+				let type: FileType;
+				if (entry.isFile()) type = FileType.File;
+				else if (entry.isDirectory()) type = FileType.Directory;
+				else if (entry.isSymbolicLink()) type = FileType.SymbolicLink;
+				else type = FileType.Unknown;
+
+				out[i] = [entry.name, type];
 			}
+
 			return out;
 		}
 		catch {

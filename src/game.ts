@@ -63,6 +63,10 @@ export class FolderSystem implements ReadableFileSystem {
 			return undefined;
 		}
 	}
+
+	toString() {
+		return `FolderSystem(path="${this.root}")`;
+	}
 }
 
 /** Shorthand function for parsing bytes as keyvalues */
@@ -241,10 +245,6 @@ export class GameSystem implements ReadableFileSystem {
 	}
 
 	protected async parse(): Promise<boolean> {
-		//
-		// TODO: The names used all over this method SUCK ASS. Rewrite this thing!
-		//
-
 		this.state = InitState.Error;
 
 		// Read & parse gameinfo
@@ -277,7 +277,7 @@ export class GameSystem implements ReadableFileSystem {
 		const cfg_mounts = await readKV(this.fs, Path.join(this.modroot, 'cfg', 'mounts.kv'));
 		if (cfg_mounts) mounts = mounts.concat(cfg_mounts.all());
 
-		// Parse collected game mounts
+		// Parse collected Strata mounts
 		for (const mount of mounts) {
 			if (mount instanceof KeyV)
 				continue;
@@ -486,5 +486,9 @@ export class GameSystem implements ReadableFileSystem {
 		}
 
 		return undefined;
+	}
+
+	toString() {
+		return `GameSystem(name="${this.name}")`;
 	}
 }
