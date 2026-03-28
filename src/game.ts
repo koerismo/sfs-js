@@ -290,7 +290,7 @@ export class GameSystem implements ReadableFileSystem {
 
 		// ... from config
 		const cfg_mounts = await readKV(this.fs, Path.join(this.modroot, 'cfg', 'mounts.kv'));
-		if (cfg_mounts) mounts = mounts.concat(cfg_mounts.all());
+		if (cfg_mounts) mounts = mounts.concat(cfg_mounts.dir('mounts').all());
 
 		// Parse collected Strata mounts
 		for (const mount of mounts) {

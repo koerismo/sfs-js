@@ -1,6 +1,5 @@
 import { FileType, type FileStat, type ReadableFileSystem } from './index.js';
 import { readFile, readdir, stat } from 'fs/promises';
-import { join, relative } from 'path/posix';
 
 export class NodeSystem implements ReadableFileSystem {
 	async readFile(path: string): Promise<Uint8Array | undefined> {

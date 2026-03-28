@@ -52,7 +52,7 @@ export class VpkSystem implements ReadableFileSystem {
 	public readonly root: string; // ABC/
 	public version: VpkVersion = VpkVersion.NONE;
 
-	files:  Record<string, VpkFileInfo | VpkFolderInfo> = {};
+	files:  Record<string, VpkFileInfo | VpkFolderInfo> = { '/': { type: FileType.Directory } };
 	cache?: Record<number, Uint8Array>;
 
 	treeSize: number = 0;
@@ -148,13 +148,13 @@ export class VpkSystem implements ReadableFileSystem {
 				if (path === ' ') path = '';
 				if (path.length && !path.startsWith('/')) path = '/' + path;
 
-				
+
 				// Add all subdirectories.
 				// TODO: Is this performant at all?
 				this.files[path] = { type: FileType.Directory };
 
-				let p = 0;
-				while ((p = path.indexOf('/', p+1)) !== -1) {
+				let p = path.length;
+				while ((p = path.lastIndexOf('/', p - 1)) > 0) {
 					const subPath = path.slice(0, p);
 					if (subPath in this.files) break;
 					this.files[subPath] = { type: FileType.Directory };
