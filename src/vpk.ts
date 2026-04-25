@@ -44,6 +44,8 @@ export function normVpkPath(path: string) {
 // TODO: Add some form of cache cleaning to prevent memory usage buildup!
 // TODO: Be more efficient with file reads & memory when accessing dir-inlined files!
 
+const FOLDER_ENTRY: VpkFolderInfo = Object.freeze({ type: FileType.Directory });
+
 export class VpkSystem implements ReadableFileSystem {
 	public readonly kind = 'vpk';
 	public readonly fs: ReadableFileSystem;
@@ -52,7 +54,7 @@ export class VpkSystem implements ReadableFileSystem {
 	public readonly root: string; // ABC/
 	public version: VpkVersion = VpkVersion.NONE;
 
-	files:  Record<string, VpkFileInfo | VpkFolderInfo> = { '/': { type: FileType.Directory } };
+	files:  Record<string, VpkFileInfo | VpkFolderInfo> = { '/': FOLDER_ENTRY };
 	cache?: Record<number, Uint8Array>;
 
 	treeSize: number = 0;
@@ -151,13 +153,13 @@ export class VpkSystem implements ReadableFileSystem {
 
 				// Add all subdirectories.
 				// TODO: Is this performant at all?
-				this.files[path] = { type: FileType.Directory };
+				this.files[path] = FOLDER_ENTRY;
 
 				let p = path.length;
 				while ((p = path.lastIndexOf('/', p - 1)) > 0) {
 					const subPath = path.slice(0, p);
 					if (subPath in this.files) break;
-					this.files[subPath] = { type: FileType.Directory };
+					this.files[subPath] = FOLDER_ENTRY;
 				}
 
 				while (true) {
