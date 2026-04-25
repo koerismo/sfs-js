@@ -1,4 +1,5 @@
-import { FileType, type FileStat, type ReadableFileSystem } from './index.js';
+import { type ReadableFileSystem } from './index.js';
+import { FileType, type FileStat } from './filetypes.js';
 import { workspace, Uri } from 'vscode';
 
 export class VSCodeSystem implements ReadableFileSystem {

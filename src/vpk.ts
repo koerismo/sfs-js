@@ -1,4 +1,5 @@
-import { FileType, type FileStat, type ReadableFileSystem, __console__ as console } from './index.js';
+import { type ReadableFileSystem, __console__ as console } from './index.js';
+import { FileType, type FileStat } from './filetypes.js';
 import Path from 'path/posix';
 
 const SIGNATURE = 0x55aa1234;
@@ -44,7 +45,7 @@ export function normVpkPath(path: string) {
 // TODO: Add some form of cache cleaning to prevent memory usage buildup!
 // TODO: Be more efficient with file reads & memory when accessing dir-inlined files!
 
-const FOLDER_ENTRY: VpkFolderInfo = Object.freeze({ type: FileType.Directory });
+const FOLDER_ENTRY: Readonly<VpkFolderInfo> = Object.freeze({ type: FileType.Directory });
 
 export class VpkSystem implements ReadableFileSystem {
 	public readonly kind = 'vpk';

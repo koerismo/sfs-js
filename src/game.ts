@@ -1,4 +1,5 @@
-import { FileType, InitState, type FileStat, type ReadableFileSystem, __console__ as console } from './index.js';
+import { InitState, type ReadableFileSystem, __console__ as console } from './index.js';
+import { FileType, type FileStat } from './filetypes.js';
 import { VpkSystem } from './vpk.js';
 
 import { parse as parseStringKV, KeyVRoot, KeyV, type KeyVChild } from 'fast-vdf';
