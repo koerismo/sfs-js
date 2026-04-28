@@ -1,6 +1,7 @@
 import { type ReadableFileSystem, __console__ as console } from './index.js';
 import { FileType, type FileStat } from './filetypes.js';
 import Path from 'path/posix';
+import { makeExpoCache, type CacheConstructorReturn } from './cache.js';
 
 const SIGNATURE = 0x55aa1234;
 const VER_MIN = 1;
@@ -45,6 +46,21 @@ export function normVpkPath(path: string) {
 // TODO: Add some form of cache cleaning to prevent memory usage buildup!
 // TODO: Be more efficient with file reads & memory when accessing dir-inlined files!
 
+export interface VpkSystemConfig {
+	/** If true, VPK files will be kept in-memory as requested to avoid file re-reads. @default true */
+	cacheEnable: boolean;
+	/** If true, VPK files will be unloaded if there is no recent file activity. @default true */
+	cacheCleaning: boolean;
+}
+
+function parseVpkSystemConfig(options?: Partial<VpkSystemConfig>) {
+	options ??= {};
+	options.cacheEnable ??= true;
+	options.cacheCleaning ??= true;
+	return options as VpkSystemConfig;
+}
+
+
 const FOLDER_ENTRY: Readonly<VpkFolderInfo> = Object.freeze({ type: FileType.Directory });
 
 export class VpkSystem implements ReadableFileSystem {
@@ -55,24 +71,37 @@ export class VpkSystem implements ReadableFileSystem {
 	public readonly root: string; // ABC/
 	public version: VpkVersion = VpkVersion.NONE;
 
-	files:  Record<string, VpkFileInfo | VpkFolderInfo> = { '/': FOLDER_ENTRY };
-	cache?: Record<number, Uint8Array>;
+	config: VpkSystemConfig;
+	protected files:  Record<string, VpkFileInfo | VpkFolderInfo> = { '/': FOLDER_ENTRY };
+	protected cache?: Record<number, Uint8Array>;
+	protected cacheTracker?: CacheConstructorReturn<number>;
 
-	treeSize: number = 0;
-	single: boolean;
+	protected treeSize: number = 0;
+	public readonly single: boolean;
 
-	constructor(fs: ReadableFileSystem, path: string, enableCache: boolean=true) {
+	constructor(fs: ReadableFileSystem, path: string, config?: Partial<VpkSystemConfig>) {
 		// TODO: What do we do if it ends with .VPK (capitalized)?
 		if (!path.endsWith('.vpk')) path += '.vpk';
 
 		this.fs = fs;
 		this.single = !path.endsWith('_dir.vpk');
-		if (enableCache) this.cache = {};
+		this.config = parseVpkSystemConfig(config);
+
+		if (this.config.cacheEnable) {
+			this.cache = {};
+			if (this.config.cacheCleaning) {
+				this.cacheTracker = makeExpoCache(this.#onVpkInactive.bind(this));
+			}
+		}
 
 		// Setup paths
 		this.path = path;
 		this.root = Path.dirname(path);
 		this.name = Path.basename(path).slice(0, this.single ? -4 : -8);
+	}
+
+	dispose() {
+		this.cacheTracker?.dispose();
 	}
 
 	protected async parse(force: boolean=false): Promise<boolean> {
@@ -201,7 +230,14 @@ export class VpkSystem implements ReadableFileSystem {
 			this.cache = {};
 	}
 
+	#onVpkInactive(index: number) {
+		if (!this.cache || !(index in this.cache)) return;
+		delete this.cache[index];
+	}
+
 	async #getArchiveData(index: number): Promise<Uint8Array | undefined> {
+		this.cacheTracker?.onActivity(index);
+
 		const cached_data = this.cache?.[index];
 		if (cached_data) return cached_data;
 

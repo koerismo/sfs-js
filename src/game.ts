@@ -1,6 +1,6 @@
 import { InitState, type ReadableFileSystem, __console__ as console } from './index.js';
 import { FileType, type FileStat } from './filetypes.js';
-import { VpkSystem } from './vpk.js';
+import { VpkSystem, VpkSystemConfig } from './vpk.js';
 
 import { parse as parseStringKV, KeyVRoot, KeyV, type KeyVChild } from 'fast-vdf';
 import Path from 'path/posix';
@@ -21,11 +21,12 @@ export class FolderSystem implements ReadableFileSystem {
 		this.root = root;
 	}
 
+	dispose() {}
+
 	async validate() {
 		try {
 			return (await this.fs.stat(this.root)) !== undefined;
-		}
-		catch {
+		} catch {
 			return false;
 		}
 	}
@@ -37,19 +38,21 @@ export class FolderSystem implements ReadableFileSystem {
 	async readFile(path: string): Promise<Uint8Array | undefined> {
 		try {
 			return await this.fs.readFile(Path.join(this.root, path));
-		}
-		catch {
+		} catch {
 			return undefined;
 		}
 	}
 
-	async readDirectory(path: string): Promise<[string, FileType][] | undefined> {
+	async readDirectory(
+		path: string,
+	): Promise<[string, FileType][] | undefined> {
 		try {
-			const items = await this.fs.readDirectory(Path.join(this.root, path));
+			const items = await this.fs.readDirectory(
+				Path.join(this.root, path),
+			);
 			if (items === undefined) return undefined;
 			return items;
-		}
-		catch {
+		} catch {
 			return undefined;
 		}
 	}
@@ -57,8 +60,7 @@ export class FolderSystem implements ReadableFileSystem {
 	async stat(path: string): Promise<FileStat | undefined> {
 		try {
 			return await this.fs.stat(Path.join(this.root, path));
-		}
-		catch {
+		} catch {
 			return undefined;
 		}
 	}
@@ -199,25 +201,44 @@ export function isDirVpkPath(path: string) {
 	return true;
 }
 
+export interface GameSystemConfig extends VpkSystemConfig {
+	preferVpks: boolean;
+}
+
+function parseGameSystemConfig(options?: Partial<GameSystemConfig>) {
+	options ??= {};
+	options.preferVpks ??= true;
+	return options as GameSystemConfig;
+}
+
 /** Represents a game filesystem. This filesystem exists in the context of the drive root. */
 export class GameSystem implements ReadableFileSystem {
-	name!: string;
 	fs: ReadableFileSystem;
 	modroot: string;
+	steam: SteamCache;
+	config: GameSystemConfig;
+
+	name!: string;
 	appid?: string;
 	gameroot?: string;
-	preferVpks: boolean;
 	state: InitState = InitState.None;
 
-	steam: SteamCache;
 	providers: [string[], MountableSystem][] = [];
 	_providersSorted: [string[], MountableSystem][] = [];
 
-	constructor(fs: ReadableFileSystem, root: string, steam?: SteamCache, preferVpks?: boolean) {
+	constructor(fs: ReadableFileSystem, root: string, steam?: SteamCache, config?: Partial<GameSystemConfig>) {
 		this.fs = fs;
 		this.modroot = root;
 		this.steam = steam ?? findSteamCache(fs);
-		this.preferVpks = preferVpks ?? true;
+		this.config = parseGameSystemConfig(config);
+	}
+
+	dispose() {
+		for (let i=0; i<this.providers.length; i++) {
+			this.providers[i][1].dispose();
+		}
+		this.providers.length = 0;
+		this._providersSorted.length = 0;
 	}
 
 	/**
@@ -257,7 +278,7 @@ export class GameSystem implements ReadableFileSystem {
 	}
 
 	protected addVpk(qualifiers: string[], path: string, atStart = false) {
-		this._add(qualifiers, new VpkSystem(this.fs, path), atStart);
+		this._add(qualifiers, new VpkSystem(this.fs, path, this.config), atStart);
 	}
 
 	protected async parse(): Promise<boolean> {
@@ -440,7 +461,7 @@ export class GameSystem implements ReadableFileSystem {
 		}
 	}
 
-	async readFile(path: string, qualifier?: string, preferVpk=this.preferVpks): Promise<Uint8Array | undefined> {
+	async readFile(path: string, qualifier?: string, preferVpk=this.config.preferVpks): Promise<Uint8Array | undefined> {
 		if (!await this.validate()) return;
 
 		const providers = preferVpk ? this._providersSorted : this.providers;
@@ -456,14 +477,14 @@ export class GameSystem implements ReadableFileSystem {
 		return;
 	}
 
-	async getRealPath(path: string, qualifier?: string, preferVpk=this.preferVpks): Promise<string | undefined> {
+	async getRealPath(path: string, qualifier?: string, preferVpk=this.config.preferVpks): Promise<string | undefined> {
 		const mount = await this.tracePathMount(path, qualifier, preferVpk);
 		if (!mount) return;
 
 		return mount[1].getPath(path);
 	}
 
-	async tracePathMount(path: string, qualifier?: string, preferVpk=this.preferVpks): Promise<[string[], MountableSystem] | undefined> {
+	async tracePathMount(path: string, qualifier?: string, preferVpk=this.config.preferVpks): Promise<[string[], MountableSystem] | undefined> {
 		if (!await this.validate()) return;
 
 		const providers = preferVpk ? this._providersSorted : this.providers;

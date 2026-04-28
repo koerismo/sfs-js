@@ -9,16 +9,11 @@
 	},
 	"exports": {
 		".": "./dist/index.js",
+		"./dist/*": "./dist/*",
 		"./vsc": {
 			"default": "./dist/fs.vsc.js"
 		},
-		"./dist/fs.vsc.js": {
-			"default": "./dist/fs.vsc.js"
-		},
 		"./node": {
-			"default": "./dist/fs.node.js"
-		},
-		"./dist/fs.node.js": {
 			"default": "./dist/fs.node.js"
 		}
 	},
