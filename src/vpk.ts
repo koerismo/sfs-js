@@ -1,5 +1,7 @@
-import { FileType, type FileStat, type ReadableFileSystem, __console__ as console } from './index.js';
+import { type ReadableFileSystem, __console__ as console } from './index.js';
+import { FileType, type FileStat } from './filetypes.js';
 import Path from 'path/posix';
+import { makeExpoCache, type CacheConstructorReturn } from './cache.js';
 
 const SIGNATURE = 0x55aa1234;
 const VER_MIN = 1;
@@ -10,11 +12,16 @@ const INDEX_INLINE = 0x7fff;
 const SLASH = '/';
 
 export interface VpkFileInfo {
+	type: FileType.File;
 	crc: number;
 	preloadBytes: Uint8Array;
 	archiveIndex: number;
 	offset: number;
 	length: number;
+}
+
+export interface VpkFolderInfo {
+	type: FileType.Directory;
 }
 
 export enum VpkVersion {
@@ -24,8 +31,37 @@ export enum VpkVersion {
 	V2 = 2,
 }
 
+/**
+ * The ideal path for a VPK is one which:
+ * - Always starts with a `/`
+ * - Never trails with a `/`
+ */
+export function normVpkPath(path: string) {
+	if (path.at(-1) === '/') path = path.slice(0, -1);
+	if (path.startsWith('./')) path = path.slice(1);
+	else if (path.at(0) !== '/') path = '/' + path;
+	return path;
+}
+
 // TODO: Add some form of cache cleaning to prevent memory usage buildup!
 // TODO: Be more efficient with file reads & memory when accessing dir-inlined files!
+
+export interface VpkSystemConfig {
+	/** If true, VPK files will be kept in-memory as requested to avoid file re-reads. @default true */
+	cacheEnable: boolean;
+	/** If true, VPK files will be unloaded if there is no recent file activity. @default true */
+	cacheCleaning: boolean;
+}
+
+function parseVpkSystemConfig(options?: Partial<VpkSystemConfig>) {
+	options ??= {};
+	options.cacheEnable ??= true;
+	options.cacheCleaning ??= true;
+	return options as VpkSystemConfig;
+}
+
+
+const FOLDER_ENTRY: Readonly<VpkFolderInfo> = Object.freeze({ type: FileType.Directory });
 
 export class VpkSystem implements ReadableFileSystem {
 	public readonly kind = 'vpk';
@@ -35,20 +71,28 @@ export class VpkSystem implements ReadableFileSystem {
 	public readonly root: string; // ABC/
 	public version: VpkVersion = VpkVersion.NONE;
 
-	files:  Record<string, VpkFileInfo> = {};
-	dirs:   Record<string, true> = { '': true };
-	cache?: Record<number, Uint8Array>;
+	config: VpkSystemConfig;
+	protected files:  Record<string, VpkFileInfo | VpkFolderInfo> = { '/': FOLDER_ENTRY };
+	protected cache?: Record<number, Uint8Array>;
+	protected cacheTracker?: CacheConstructorReturn<number>;
 
-	treeSize: number = 0;
-	single: boolean;
+	protected treeSize: number = 0;
+	public readonly single: boolean;
 
-	constructor(fs: ReadableFileSystem, path: string, enableCache: boolean=true) {
+	constructor(fs: ReadableFileSystem, path: string, config?: Partial<VpkSystemConfig>) {
 		// TODO: What do we do if it ends with .VPK (capitalized)?
 		if (!path.endsWith('.vpk')) path += '.vpk';
 
 		this.fs = fs;
 		this.single = !path.endsWith('_dir.vpk');
-		if (enableCache) this.cache = {};
+		this.config = parseVpkSystemConfig(config);
+
+		if (this.config.cacheEnable) {
+			this.cache = {};
+			if (this.config.cacheCleaning) {
+				this.cacheTracker = makeExpoCache(this.#onVpkInactive.bind(this));
+			}
+		}
 
 		// Setup paths
 		this.path = path;
@@ -56,7 +100,11 @@ export class VpkSystem implements ReadableFileSystem {
 		this.name = Path.basename(path).slice(0, this.single ? -4 : -8);
 	}
 
-	async parse(force: boolean=false): Promise<boolean> {
+	dispose() {
+		this.cacheTracker?.dispose();
+	}
+
+	protected async parse(force: boolean=false): Promise<boolean> {
 		if (!force && this.version === VpkVersion.INVALID) return false;
 
 		// In case an error is thrown, leave us on invalid.
@@ -112,6 +160,7 @@ export class VpkSystem implements ReadableFileSystem {
 			i += preloadLength;
 
 			return {
+				type: FileType.File,
 				crc,
 				preloadBytes: preloadBytes,
 				archiveIndex,
@@ -131,13 +180,16 @@ export class VpkSystem implements ReadableFileSystem {
 				if (path === ' ') path = '';
 				if (path.length && !path.startsWith('/')) path = '/' + path;
 
+
 				// Add all subdirectories.
 				// TODO: Is this performant at all?
-				this.dirs[path] = true;
-				this.dirs[path+'/'] = true;
-				let i=0;
-				while ((i = path.indexOf('/', i+1)) !== -1) {
-					this.dirs[path.slice(0, i)] = true;
+				this.files[path] = FOLDER_ENTRY;
+
+				let p = path.length;
+				while ((p = path.lastIndexOf('/', p - 1)) > 0) {
+					const subPath = path.slice(0, p);
+					if (subPath in this.files) break;
+					this.files[subPath] = FOLDER_ENTRY;
 				}
 
 				while (true) {
@@ -178,7 +230,14 @@ export class VpkSystem implements ReadableFileSystem {
 			this.cache = {};
 	}
 
-	async #getArchiveData(index: number): Promise<Uint8Array|undefined> {
+	#onVpkInactive(index: number) {
+		if (!this.cache || !(index in this.cache)) return;
+		delete this.cache[index];
+	}
+
+	async #getArchiveData(index: number): Promise<Uint8Array | undefined> {
+		this.cacheTracker?.onActivity(index);
+
 		const cached_data = this.cache?.[index];
 		if (cached_data) return cached_data;
 
@@ -192,17 +251,17 @@ export class VpkSystem implements ReadableFileSystem {
 		return archive_data;
 	}
 
-	async getFileInfo(path: string): Promise<VpkFileInfo|undefined> {
+	async getFileInfo(path: string): Promise<VpkFileInfo | VpkFolderInfo | undefined> {
 		if (!await this.validate()) return undefined;
-		if (path in this.files) return this.files[path];
-		return undefined;
+		path = normVpkPath(path);
+		return this.files[path];
 	}
 
-	async readFile(path: string): Promise<Uint8Array|undefined> {
+	async readFile(path: string): Promise<Uint8Array | undefined> {
 		if (!await this.validate()) return undefined;
-	
+
 		const info = await this.getFileInfo(path);
-		if (!info) return undefined;
+		if (!info || info.type !== FileType.File) return undefined;
 
 		// Entire file is stored in preloadBytes
 		if (!info.length) {
@@ -219,7 +278,7 @@ export class VpkSystem implements ReadableFileSystem {
 
 		// Make a sub-array without cloning the buffer to avoid an unnecessary copy
 		const archive_window = new Uint8Array(archive_data.buffer, offset, info.length);
-		
+
 		// Combine preloadBytes and body data in new buffer
 		const out_data = new Uint8Array(info.length + info.preloadBytes.length);
 		out_data.set(info.preloadBytes, 0);
@@ -228,27 +287,20 @@ export class VpkSystem implements ReadableFileSystem {
 		return out_data;
 	}
 
-	async readDirectory(path: string): Promise<[string, FileType][]|undefined> {
+	async readDirectory(path: string): Promise<[string, FileType][] | undefined> {
 		if (!await this.validate()) return undefined;
+		path = normVpkPath(path);
 
 		const out: [string, FileType][] = [];
-		const included: Record<string, true> = {};
 
-		for (const file in this.files) {
-			if (!file.startsWith(path)) continue;
-			const slash_pos = file.indexOf(SLASH, path.length+1);
-			const is_dir = slash_pos !== -1;
+		for (const entryPath in this.files) {
+			if (entryPath === path) continue;
+			if (!entryPath.startsWith(path)) continue;
 
-			if (is_dir) {
-				const dirname = file.slice(0, slash_pos);
-				if (dirname === path) continue;
-				if (dirname in included) continue;
-				included[dirname] = true;
-				out.push([Path.basename(dirname), FileType.Directory]);
-			}
-			else {
-				out.push([Path.basename(file), FileType.File]);
-			}
+			const slash_pos = entryPath.indexOf(SLASH, path.length + 1);
+			if (slash_pos !== -1) continue;
+
+			out.push([Path.basename(entryPath), this.files[entryPath].type]);
 		}
 
 		return out;
@@ -256,20 +308,15 @@ export class VpkSystem implements ReadableFileSystem {
 
 	async stat(path: string): Promise<FileStat | undefined> {
 		const file = await this.getFileInfo(path);
-		if (file !== undefined) return { 
+		return file && { 
 			ctime: 0,
 			mtime: 0,
-			size: file ? file.length : 0,
-			type: file ? FileType.File : FileType.Directory,
+			size: file.type === FileType.File ? file.length : 0,
+			type: file.type,
 		};
+	}
 
-		if (path in this.dirs) return {
-			ctime: 0,
-			mtime: 0,
-			size: 0,
-			type: FileType.Directory,
-		}
-
-		return undefined;
+	toString() {
+		return `VpkSystem(path="${this.path}")`;
 	}
 }

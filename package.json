@@ -9,28 +9,21 @@
 	},
 	"exports": {
 		".": "./dist/index.js",
+		"./dist/*": "./dist/*",
 		"./vsc": {
-			"default": "./dist/fs.vsc.js"
-		},
-		"./dist/fs.vsc.js": {
 			"default": "./dist/fs.vsc.js"
 		},
 		"./node": {
 			"default": "./dist/fs.node.js"
-		},
-		"./dist/fs.node.js": {
-			"default": "./dist/fs.node.js"
 		}
 	},
 	"devDependencies": {
-		"@types/bun": "latest"
-	},
-	"peerDependencies": {
-		"typescript": "^5.0.0"
+		"@types/bun": "latest",
+		"@types/node": "^25.6.0",
+		"@types/vscode": "^1.116.0",
+		"typescript": "^6.0.3"
 	},
 	"dependencies": {
-		"@types/vscode": "^1.107.0",
-		"fast-vdf": "^3.0.0",
-		"glob": "^13.0.0"
+		"fast-vdf": "^3.0.0"
 	}
 }
